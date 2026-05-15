@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sistema Avanzado de Lectura MRZ - Chile</title>
+    <script src="https://unpkg.com/tesseract.js@v2.1.4/dist/tesseract.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --secondary-color: #1d4ed8;
+            --success-color: #22c55e;
+            --error-color: #ef4444;
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        header {
+            width: 100%;
+            padding: 2rem 0;
+            text-align: center;
+            background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0) 100%);
+        }
+
+        .main-container {
+            width: 90%;
+            max-width: 600px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            padding-bottom: 3rem;
+        }
+
+        .scanner-viewport {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1.58 / 1;
+            background: #000;
+            border-radius: 24px;
+            overflow: hidden;
+            border: 2px solid #334155;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .scanner-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+
+        .scan-window {
+            width: 85%;
+            height: 45%;
+            border: 3px solid var(--success-color);
+            border-radius: 16px;
+            box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.6);
+            position: relative;
+        }
+
+        .scan-window::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: var(--success-color);
+            box-shadow: 0 0 15px var(--success-color);
+            animation: scanning 2s infinite ease-in-out;
+        }
+
+        @keyframes scanning {
+            0% { top: 0%; }
+            50% { top: 100%; }
+            100% { top: 0%; }
+        }
+
+        .ui-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .status-badge {
+            padding: 0.75rem;
+            background: rgba(51, 65, 85, 0.5);
+            border-radius: 12px;
+            font-size: 0.875rem;
+            text-align: center;
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .btn-action {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 1.25rem;
+            border-radius: 16px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-action:hover {
+            background-color: var(--secondary-color);
+            transform: translateY(-2px);
+        }
+
+        .btn-action:disabled {
+            background-color: #475569;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .results-container {
+            background-color: var(--card-bg);
+            border-radius: 20px;
+            padding: 1.5rem;
+            display: none;
+            border: 1px solid #334155;
+            animation: slideUp 0.4s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .data-field {
+            margin-bottom: 1.25rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .data-field:last-child {
+            border: none;
+            margin-bottom: 0;
+        }
+
+        .field-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+        }
+
+        .field-value {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 1.1rem;
+            color: var(--text-main);
+        }
+
+        .highlight {
+            color: var(--success-color);
+            font-weight: 600;
+        }
+
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1 style="margin:0; font-size: 1.5rem;">Cédula de Identidad</h1>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">Escáner de Zona MRZ (Reverso)</p>
+    </header>
+
+    <div class="main-container">
+        <div class="scanner-viewport">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="scanner-overlay">
+                <div class="scan-window"></div>
+            </div>
+        </div>
+
+        <div class="ui-panel">
+            <div id="status" class="status-badge">Inicializando cámara...</div>
+            <button id="scanBtn" class="btn-action">ANALIZAR DOCUMENTO</button>
+        </div>
+
+        <div id="resultsPanel" class="results-container">
+            <div class="data-field">
+                <div class="field-label">Nombre Completo</div>
+                <div id="res-name" class="field-value">---</div>
+            </div>
+            <div class="data-field">
+                <div class="field-label">RUN / RUT</div>
+                <div id="res-rut" class="field-value highlight">---</div>
+            </div>
+            <div class="data-field">
+                <div class="field-label">Vencimiento</div>
+                <div id="res-expiry" class="field-value">---</div>
+            </div>
+            <div class="data-field" style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px;">
+                <div class="field-label">Lectura Cruda (OCR)</div>
+                <div id="res-raw" class="field-value" style="font-size: 0.8rem; opacity: 0.7; word-break: break-word;">---</div>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="canvas"></canvas>
+
+<script>
+    const video = document.getElementById('video');
+    const scanBtn = document.getElementById('scanBtn');
+    const status = document.getElementById('status');
+    const resultsPanel = document.getElementById('resultsPanel');
+    const canvas = document.getElementById('canvas');
+
+    async function initCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            });
+
+            video.srcObject = stream;
+            await video.play();
+
+            status.innerText = 'Sistema listo. Alinee el reverso de su cédula.';
+        } catch (err) {
+            status.innerHTML = `<span style="color:var(--error-color)">Error: cámara bloqueada o sin permisos.</span>`;
+            console.error('Error cámara:', err);
+        }
+    }
+
+    async function processOCR() {
+        scanBtn.disabled = true;
+        resultsPanel.style.display = 'none';
+        status.innerText = 'Capturando imagen de alta resolución...';
+
+        if (!video.srcObject || !video.videoWidth || !video.videoHeight) {
+            status.innerHTML = `<span style="color:var(--error-color)">La cámara aún no está lista.</span>`;
+            scanBtn.disabled = false;
+            return;
+        }
+
+        const ctx = canvas.getContext('2d');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        let worker = null;
+
+        try {
+            status.innerText = 'Cargando motor OCR...';
+
+            worker = await Tesseract.createWorker({
+                logger: m => {
+                    if (m.status === 'recognizing text') {
+                        status.innerText = `Analizando: ${Math.round(m.progress * 100)}%`;
+                    } else if (m.status) {
+                        status.innerText = m.status;
+                    }
+                }
+            });
+
+            await worker.load();
+            await worker.loadLanguage('eng');
+            await worker.initialize('eng');
+
+            if (typeof worker.setParameters === 'function') {
+                await worker.setParameters({
+                    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+                    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<'
+                });
+            }
+
+            const { data: { text } } = await worker.recognize(canvas);
+            handleData(text || '');
+            status.innerText = 'Análisis completado con éxito.';
+        } catch (err) {
+            console.error('Error en OCR:', err);
+            status.innerHTML = `<span style="color:var(--error-color)">Error de OCR. Ábrelo desde un servidor local, por ejemplo Live Server.</span>`;
+        } finally {
+            if (worker) {
+                try {
+                    await worker.terminate();
+                } catch (terminateErr) {
+                    console.error('Error al cerrar worker:', terminateErr);
+                }
+            }
+            scanBtn.disabled = false;
+        }
+    }
+
+    function handleData(rawText) {
+        resultsPanel.style.display = 'block';
+        document.getElementById('res-raw').innerText = rawText || 'Sin texto detectado';
+
+        const lines = rawText.split('\n').map(line => line.trim()).filter(Boolean);
+        let rut = 'No detectado';
+        let name = 'No detectado';
+        let expiry = 'No detectado';
+
+        lines.forEach(line => {
+            const cleanLine = line.replace(/\s/g, '').toUpperCase();
+
+            const rutMatch = cleanLine.match(/(\d{7,8})<(\d|K)/);
+            if (rutMatch) {
+                rut = `${rutMatch[1]}-${rutMatch[2]}`;
+            }
+
+            if (cleanLine.includes('<<')) {
+                name = cleanLine.replace(/</g, ' ').replace(/\s+/g, ' ').trim();
+            }
+
+            const dateMatch = cleanLine.match(/(\d{6})\d[MF](\d{6})/);
+            if (dateMatch) {
+                const rawDate = dateMatch[2];
+                expiry = `${rawDate.substring(4, 6)}/${rawDate.substring(2, 4)}/20${rawDate.substring(0, 2)}`;
+            }
+        });
+
+        document.getElementById('res-rut').innerText = rut;
+        document.getElementById('res-name').innerText = name;
+        document.getElementById('res-expiry').innerText = expiry;
+        resultsPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    scanBtn.addEventListener('click', processOCR);
+    window.addEventListener('load', initCamera);
+</script>
+</body>
+</html>
