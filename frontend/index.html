@@ -234,6 +234,8 @@
 <canvas id="canvas"></canvas>
 
 <script>
+    console.log('Script iniciado');
+    
     const video = document.getElementById('video');
     const scanBtn = document.getElementById('scanBtn');
     const status = document.getElementById('status');
@@ -244,6 +246,7 @@
     const API_BASE = 'https://tu-backend-ocr.example.com';
 
     async function initCamera() {
+        console.log('Iniciando cámara...');
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
@@ -255,22 +258,30 @@
             });
 
             video.srcObject = stream;
-            await video.play();
-            status.innerText = 'Sistema listo. Alinee el reverso de su cédula.';
+            
+            // Esperar a que el video esté listo
+            video.onloadedmetadata = () => {
+                console.log('Video cargado correctamente');
+                status.innerText = 'Sistema listo. Alinee el reverso de su cédula.';
+                status.style.color = 'var(--text-muted)';
+            };
+
         } catch (err) {
-            status.innerHTML = `<span style="color:var(--error-color)">
-                Error: cámara bloqueada o sin permisos.
-            </span>`;
             console.error('Error cámara:', err);
+            status.innerHTML = `<span style="color:var(--error-color)">
+                Error: ${err.message}
+            </span>`;
         }
     }
 
     async function processOCR() {
+        console.log('Iniciando captura OCR...');
         scanBtn.disabled = true;
         resultsPanel.style.display = 'none';
         status.innerText = 'Capturando imagen de alta resolución...';
 
         if (!video.srcObject || !video.videoWidth || !video.videoHeight) {
+            console.error('Video no está listo');
             status.innerHTML = `<span style="color:var(--error-color)">
                 La cámara aún no está lista.
             </span>`;
@@ -278,28 +289,31 @@
             return;
         }
 
-        const ctx = canvas.getContext('2d');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        status.innerText = 'Enviando imagen para análisis seguro...';
-
-        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
-        const formData = new FormData();
-        formData.append('image', blob, 'mrz.jpg');
-
         try {
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            status.innerText = 'Enviando imagen para análisis seguro...';
+
+            const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+            const formData = new FormData();
+            formData.append('image', blob, 'mrz.jpg');
+
+            console.log('Enviando blob de', blob.size, 'bytes');
+
             const resp = await fetch(`${API_BASE}/api/mrz`, {
                 method: 'POST',
                 body: formData
             });
 
             if (!resp.ok) {
-                throw new Error('Error en servidor OCR');
+                throw new Error(`Error en servidor OCR: ${resp.status}`);
             }
 
             const data = await resp.json();
+            console.log('Respuesta recibida:', data);
 
             document.getElementById('res-raw').innerText = data.rawText || '';
             document.getElementById('res-name').innerText = data.name || 'No detectado';
@@ -310,9 +324,9 @@
             resultsPanel.scrollIntoView({ behavior: 'smooth' });
             status.innerText = 'Análisis completado con éxito.';
         } catch (err) {
-            console.error(err);
+            console.error('Error en processOCR:', err);
             status.innerHTML = `<span style="color:var(--error-color)">
-                Error de servidor OCR.
+                Error: ${err.message}
             </span>`;
         } finally {
             scanBtn.disabled = false;
@@ -320,7 +334,14 @@
     }
 
     scanBtn.addEventListener('click', processOCR);
-    window.addEventListener('load', initCamera);
+    
+    // Inicializar cuando el DOM esté listo
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initCamera);
+    } else {
+        // El DOM ya está cargado
+        initCamera();
+    }
 </script>
 </body>
 </html>
