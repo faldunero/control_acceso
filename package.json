@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "cors": "^2.8.6",
+    "tesseract.js": "^7.0.0"
+  }
+}
